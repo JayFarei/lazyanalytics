@@ -1,0 +1,54 @@
+name: Release
+
+# Publishes to npm when a version tag (v*) is pushed.
+# Requires the NPM_TOKEN repository secret (an npm automation token).
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Verify tag matches package version
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $PKG_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Check for NPM_TOKEN
+        id: npm-token
+        run: echo "present=${NPM_TOKEN:+true}" >> "$GITHUB_OUTPUT"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # prepublishOnly runs build + test
+      - name: Publish to npm
+        if: steps.npm-token.outputs.present == 'true'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Skipped (no NPM_TOKEN)
+        if: steps.npm-token.outputs.present != 'true'
+        run: echo "NPM_TOKEN secret is not set; skipping npm publish. Add it in repo settings to enable tag-triggered releases."

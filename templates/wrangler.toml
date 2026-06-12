@@ -1,0 +1,14 @@
+# lazyanalytics worker config (scaffolded by `lazyanalytics setup`)
+# Account is provided via the CLOUDFLARE_ACCOUNT_ID env var at deploy time;
+# do not add an account_id line here.
+name = "__WORKER_NAME__"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+
+[vars]
+# Comma-separated list of sites to track
+ALLOWED_SITES = "__ALLOWED_SITES__"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "agent_analytics"

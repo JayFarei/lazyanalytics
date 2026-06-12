@@ -1,0 +1,14 @@
+name = "lazyanalytics"
+main = "src/index.ts"
+compatibility_date = "2026-03-01"
+
+# No account_id here on purpose: pass it via the CLOUDFLARE_ACCOUNT_ID
+# environment variable when running wrangler (the setup flow does this).
+
+[vars]
+# Comma-separated list of sites to track
+ALLOWED_SITES = "example.com"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "agent_analytics"

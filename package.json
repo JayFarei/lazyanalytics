@@ -1,0 +1,58 @@
+{
+  "name": "@jayfarei/lazyanalytics",
+  "version": "0.1.0",
+  "description": "Agent-first web analytics on Cloudflare Workers + Analytics Engine. Self-hosted, privacy-friendly, queryable from the command line.",
+  "license": "MIT",
+  "author": "JayFarei",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JayFarei/lazyanalytics.git"
+  },
+  "homepage": "https://github.com/JayFarei/lazyanalytics#readme",
+  "bugs": {
+    "url": "https://github.com/JayFarei/lazyanalytics/issues"
+  },
+  "keywords": [
+    "analytics",
+    "web-analytics",
+    "cloudflare-workers",
+    "analytics-engine",
+    "privacy",
+    "cli",
+    "agent"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "worker",
+    "cli"
+  ],
+  "bin": {
+    "lazyanalytics": "cli/dist/index.js"
+  },
+  "files": [
+    "cli/dist",
+    "dist/worker.js",
+    "templates",
+    "skill/SKILL.md",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build-worker.mjs && npm run build --workspace cli",
+    "test": "npm test --workspace worker",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "commander": "^13.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

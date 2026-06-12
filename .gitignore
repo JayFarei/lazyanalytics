@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.backup
+.dev.vars
+dist/
+.wrangler/
+*.pem
+.gstack/
+.agentfather/
+.agent-trace/
+.opentraces/
+.opentraces.json
+.tmux-session

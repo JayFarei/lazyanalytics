@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies (root + workspaces)
+        run: npm install
+
+      - name: Build (worker bundle + CLI)
+        run: npm run build
+
+      - name: Typecheck worker
+        run: npx tsc --noEmit
+        working-directory: worker
+
+      - name: Typecheck CLI
+        run: npx tsc --noEmit
+        working-directory: cli
+
+      - name: Test
+        run: npm test
