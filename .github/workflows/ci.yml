@@ -20,7 +20,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies (root + workspaces)
-        run: npm install
+        run: npm ci
 
       - name: Build (worker bundle + CLI)
         run: npm run build
