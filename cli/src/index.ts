@@ -7,6 +7,7 @@ import { sitesCommand } from './commands/sites.js';
 import { snippetCommand } from './commands/snippet.js';
 import { skillCommand } from './commands/skill.js';
 import { configCommand } from './commands/config.js';
+import { activeCommand } from './commands/active.js';
 import { packageVersion } from './lib/paths.js';
 
 const program = new Command();
@@ -22,9 +23,27 @@ program
   .version(packageVersion());
 
 program.addCommand(makeCommand('stats', 'Aggregate statistics (pageviews, approx visitors, avg screen width)'));
+program.addCommand(activeCommand());
 program.addCommand(makeCommand('pages', 'Top pages by view count'));
 program.addCommand(makeCommand('referrers', 'Top referrer domains'));
 program.addCommand(makeCommand('geo', 'Geographic breakdown by country'));
+program.addCommand(makeCommand('channels', 'Acquisition channel breakdown (pageview-scoped)'));
+program.addCommand(makeCommand('bounce', 'Bounce rate (% single-pageview sessions)'));
+program.addCommand(makeCommand('duration', 'Average session duration in seconds'));
+program.addCommand(
+  makeCommand('history', 'Long-term stats blending live AE (<=90d) with R2 archives (>90d)')
+    .option('--dimension <dimension>', 'Dimension: totals, pages, referrers, geo, browsers', 'totals')
+    .option('--days <days>', 'Lookback days, can exceed 90')
+    .option('--from <date>', 'Start date YYYY-MM-DD')
+    .option('--to <date>', 'End date YYYY-MM-DD'),
+);
+program.addCommand(
+  makeCommand('crawlers', 'AI agent breakdown (training, search, user-triggered)').option(
+    '--type <type>',
+    'Breakdown type: name, operator, class',
+    'name',
+  ),
+);
 program.addCommand(
   makeCommand('browsers', 'Browser, OS, or device breakdown').option(
     '--type <type>',

@@ -20,13 +20,21 @@ export interface QueryOptions {
   endAt: Date;
 }
 
-export interface ApiResponse<T> {
+export type TrafficClassFilter = 'human' | 'ai' | 'all';
+export type EventTypeFilter = 'pv' | 'all';
+
+export interface WhereClauseFilters {
+  trafficClass?: TrafficClassFilter;
+  eventType?: EventTypeFilter;
+}
+
+export interface ApiResponse<T, M extends Record<string, unknown> = Record<string, never>> {
   data: T;
   meta: {
     site: string;
     period: string;
     sampled: boolean;
-  };
+  } & M;
 }
 
 /** Parse period string like "7d", "30d", "90d" into start/end dates */
@@ -99,17 +107,43 @@ export function formatTimestamp(d: Date): string {
   return d.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
 }
 
-/** Build the WHERE clause for site filtering + time range */
-export function buildWhereClause(opts: QueryOptions): string {
+/**
+ * Empty Analytics Engine blobs have been observed as deployment-sensitive; this
+ * predicate intentionally matches both representations until the live probe
+ * can narrow it for the release deployment.
+ */
+export const HUMAN_TRAFFIC_PREDICATE = "(blob10 = '' OR blob10 IS NULL)";
+export const PAGEVIEW_EVENT_PREDICATE = "(blob16 = 'pv' OR blob16 = '' OR blob16 IS NULL)";
+
+/** Build the WHERE clause for site filtering + time range + shared row filters */
+export function buildWhereClause(opts: QueryOptions, filters: WhereClauseFilters = {}): string {
   const site = opts.site.replace(/'/g, "''"); // escape single quotes
   const start = formatTimestamp(opts.startAt);
   const end = formatTimestamp(opts.endAt);
-  return `WHERE blob1 = '${site}' AND timestamp >= toDateTime('${start}') AND timestamp <= toDateTime('${end}')`;
+
+  const trafficClass = filters.trafficClass ?? 'human';
+  const trafficClause =
+    trafficClass === 'human'
+      ? ` AND ${HUMAN_TRAFFIC_PREDICATE}`
+      : trafficClass === 'ai'
+        ? " AND blob10 = 'ai'"
+        : '';
+
+  const eventType = filters.eventType ?? 'pv';
+  const eventClause = eventType === 'pv' ? ` AND ${PAGEVIEW_EVENT_PREDICATE}` : '';
+
+  return `WHERE blob1 = '${site}' AND timestamp >= toDateTime('${start}') AND timestamp <= toDateTime('${end}')${trafficClause}${eventClause}`;
 }
 
 /** Wrap response in standard API envelope */
-export function envelope<T>(data: T, site: string, period: string, sampled: boolean): ApiResponse<T> {
-  return { data, meta: { site, period, sampled } };
+export function envelope<T, M extends Record<string, unknown> = Record<string, never>>(
+  data: T,
+  site: string,
+  period: string,
+  sampled: boolean,
+  extraMeta?: M,
+): ApiResponse<T, M> {
+  return { data, meta: { site, period, sampled, ...(extraMeta || {}) } as ApiResponse<T, M>['meta'] };
 }
 
 /**
@@ -147,4 +181,60 @@ export function extractParams(c: { req: { query: (key: string) => string | undef
 
   const { startAt, endAt } = parsePeriod(period);
   return { site, period, limit, opts: { site, startAt, endAt } };
+}
+
+/** Parse history periods; unlike parsePeriod this intentionally allows >90d. */
+export function parseLongPeriod(params: {
+  days?: string;
+  from?: string;
+  to?: string;
+}, now: Date = new Date()): { startAt: Date; endAt: Date; period: string } {
+  if (params.from || params.to) {
+    if (!params.from || !params.to) {
+      throw new Error('History requires both from and to when either is provided');
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(params.from) || !/^\d{4}-\d{2}-\d{2}$/.test(params.to)) {
+      throw new Error('History from/to must be YYYY-MM-DD');
+    }
+    const startAt = new Date(`${params.from}T00:00:00.000Z`);
+    const endAt = new Date(`${params.to}T23:59:59.999Z`);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || startAt > endAt) {
+      throw new Error('Invalid history date range');
+    }
+    return { startAt, endAt, period: `${params.from}..${params.to}` };
+  }
+
+  const days = params.days ? parseInt(params.days, 10) : 90;
+  if (!Number.isFinite(days) || days < 1 || days > 3650) {
+    throw new Error(`History days must be between 1 and 3650. Got: ${params.days}`);
+  }
+  const endAt = now;
+  const startAt = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - days + 1,
+  ));
+  return { startAt, endAt, period: `${days}d` };
+}
+
+export function utcDayKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+export function utcDayBounds(day: string): { startAt: Date; endAt: Date } {
+  return {
+    startAt: new Date(`${day}T00:00:00.000Z`),
+    endAt: new Date(`${day}T23:59:59.999Z`),
+  };
+}
+
+export function dayKeys(startAt: Date, endAt: Date): string[] {
+  const keys: string[] = [];
+  const cursor = new Date(Date.UTC(startAt.getUTCFullYear(), startAt.getUTCMonth(), startAt.getUTCDate()));
+  const last = new Date(Date.UTC(endAt.getUTCFullYear(), endAt.getUTCMonth(), endAt.getUTCDate()));
+  while (cursor <= last) {
+    keys.push(utcDayKey(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return keys;
 }

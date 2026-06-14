@@ -8,7 +8,10 @@ compatibility_date = "2026-03-01"
 [vars]
 # Comma-separated list of sites to track
 ALLOWED_SITES = "__ALLOWED_SITES__"
+TRACK_AI_CRAWLERS = "__TRACK_AI_CRAWLERS__"
 
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
 dataset = "agent_analytics"
+
+__ARCHIVE_CONFIG__

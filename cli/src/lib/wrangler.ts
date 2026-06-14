@@ -69,6 +69,35 @@ export function wranglerSecretPut(
   });
 }
 
+/** Create an R2 bucket if it does not already exist. */
+export function wranglerR2BucketCreate(
+  cwd: string,
+  env: WranglerEnv,
+  bucket: string,
+): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(NPX, ['wrangler@4', 'r2', 'bucket', 'create', bucket], {
+      cwd,
+      env: wranglerProcessEnv(env),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+      process.stderr.write(chunk);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+      process.stderr.write(chunk);
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0 || /already exists/i.test(output)) resolvePromise();
+      else reject(new Error(`wrangler r2 bucket create ${bucket} exited with code ${code}`));
+    });
+  });
+}
+
 /** Parse the workers.dev URL from wrangler deploy output. Returns null if absent. */
 export function parseWorkersDevUrl(deployOutput: string): string | null {
   const match = deployOutput.match(/https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.workers\.dev/i);

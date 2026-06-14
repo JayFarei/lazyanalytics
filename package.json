@@ -1,6 +1,6 @@
 {
   "name": "@jayfarei/lazyanalytics",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Agent-first web analytics on Cloudflare Workers + Analytics Engine. Self-hosted, privacy-friendly, queryable from the command line.",
   "license": "MIT",
   "author": "JayFarei",

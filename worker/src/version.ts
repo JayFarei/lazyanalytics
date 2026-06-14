@@ -5,4 +5,4 @@
  * when running from source via `wrangler dev`.
  */
 declare const __PKG_VERSION__: string | undefined;
-export const VERSION = typeof __PKG_VERSION__ !== 'undefined' ? __PKG_VERSION__ : '0.1.0';
+export const VERSION = typeof __PKG_VERSION__ !== 'undefined' ? __PKG_VERSION__ : '0.3.0';

@@ -3,7 +3,7 @@ import type { Env } from './index';
 
 const TRACKER_SCRIPT = `(function(){
   "use strict";
-  var d=document,w=window,l=d.currentScript;
+  var d=document,w=window,l=d.currentScript,t0=0,sent=0,last="";
   if(!l)return;
   var sid=l.getAttribute("data-site-id");
   if(!sid)return;
@@ -38,14 +38,24 @@ const TRACKER_SCRIPT = `(function(){
   }
 
   function track(){
+    t0=performance&&performance.now?performance.now():Date.now();
+    sent=0;
+    last=stripUrl(w.location.href);
     send({
       sid:sid,
-      url:stripUrl(w.location.href),
+      url:last,
       ref:stripRef(d.referrer),
       sw:w.screen?w.screen.width:0,
       us:getUTM("utm_source"),
       um:getUTM("utm_medium")
     });
+  }
+
+  function dwell(){
+    if(sent||!last)return;
+    sent=1;
+    var now=performance&&performance.now?performance.now():Date.now();
+    send({sid:sid,url:last,em:Math.max(0,Math.round(now-t0)),t:"eng"});
   }
 
   // Track on page load
@@ -62,6 +72,8 @@ const TRACKER_SCRIPT = `(function(){
     setTimeout(track,10);
   };
   w.addEventListener("popstate",function(){setTimeout(track,10);});
+  w.addEventListener("pagehide",dwell);
+  d.addEventListener("visibilitychange",function(){if(d.visibilityState==="hidden")dwell();});
 })();`;
 
 export function serveTracker(c: Context<{ Bindings: Env }>) {

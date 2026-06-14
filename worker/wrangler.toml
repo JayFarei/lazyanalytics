@@ -8,7 +8,15 @@ compatibility_date = "2026-03-01"
 [vars]
 # Comma-separated list of sites to track
 ALLOWED_SITES = "example.com"
+TRACK_AI_CRAWLERS = "false"
 
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
 dataset = "agent_analytics"
+
+[[r2_buckets]]
+binding = "ARCHIVE"
+bucket_name = "lazyanalytics-archive"
+
+[triggers]
+crons = ["5 1 * * *"]

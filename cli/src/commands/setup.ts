@@ -12,7 +12,7 @@ import {
 import { packagedWorkerBundle, packagedWranglerTemplate } from '../lib/paths.js';
 import { isValidDomain, prompt, promptHidden, trackingSnippet } from '../lib/prompt.js';
 import { readAllowedSites } from '../lib/scaffold.js';
-import { parseWorkersDevUrl, wranglerDeploy, wranglerSecretPut } from '../lib/wrangler.js';
+import { parseWorkersDevUrl, wranglerDeploy, wranglerR2BucketCreate, wranglerSecretPut } from '../lib/wrangler.js';
 
 function fail(message: string): never {
   console.error(`Error: ${message}`);
@@ -45,6 +45,10 @@ export function setupCommand(): Command {
     .option('--sites <sites>', 'Comma-separated list of site domains to track')
     .option('--account-id <id>', 'Cloudflare account ID (32-char hex)')
     .option('--name <name>', 'Worker name', 'lazyanalytics')
+    .option('--track-ai-crawlers', 'Store JS-executing AI crawler beacons separately')
+    .option('--archive', 'Enable daily R2 rollups for history beyond Analytics Engine retention', true)
+    .option('--no-archive', 'Do not create or bind the R2 archive bucket')
+    .option('--archive-bucket <name>', 'R2 bucket name for daily rollups', 'lazyanalytics-archive')
     .option('--rotate-secrets', 'Regenerate API_SECRET and HASH_SALT instead of reusing them')
     .option('-y, --yes', 'Non-interactive mode: never prompt, fail if input is missing')
     .action(async (opts) => {
@@ -102,14 +106,23 @@ export function setupCommand(): Command {
 
       const templatePath = packagedWranglerTemplate();
       if (!existsSync(templatePath)) fail(`wrangler.toml template not found at ${templatePath}`);
+      const archiveConfig = opts.archive === false
+        ? ''
+        : `[[r2_buckets]]\nbinding = "ARCHIVE"\nbucket_name = "${opts.archiveBucket}"\n\n[triggers]\ncrons = ["5 1 * * *"]\n`;
       const toml = readFileSync(templatePath, 'utf-8')
         .replace(/__WORKER_NAME__/g, opts.name)
-        .replace(/__ALLOWED_SITES__/g, sites.join(','));
+        .replace(/__ALLOWED_SITES__/g, sites.join(','))
+        .replace(/__TRACK_AI_CRAWLERS__/g, opts.trackAiCrawlers ? 'true' : 'false')
+        .replace(/__ARCHIVE_CONFIG__/g, archiveConfig);
       writeFileSync(wranglerTomlPath, toml);
       console.log(`Scaffolded worker in ${WORKER_SCAFFOLD_DIR}`);
 
       // --- Deploy ---
       const wranglerEnv = { CLOUDFLARE_API_TOKEN: apiToken, CLOUDFLARE_ACCOUNT_ID: accountId };
+      if (opts.archive !== false) {
+        console.log('\nEnsuring R2 archive bucket exists...');
+        await wranglerR2BucketCreate(WORKER_SCAFFOLD_DIR, wranglerEnv, opts.archiveBucket);
+      }
       console.log('\nDeploying worker with wrangler...');
       const deployOutput = await wranglerDeploy(WORKER_SCAFFOLD_DIR, wranglerEnv);
 

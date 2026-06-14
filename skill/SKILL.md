@@ -7,7 +7,7 @@ description: |
   user asks about website traffic ("how is my site doing", "pageviews for"), wants to set
   up or deploy analytics, add/remove a tracked site, get a tracking snippet, or check
   analytics usage and cost.
-version: 0.1.0
+version: 0.3.0
 ---
 
 # lazyanalytics
@@ -60,6 +60,12 @@ Tracking snippet shape (place in the site's `<head>`):
 <script defer id="analytics" data-site-id="example.com" src="https://lazyanalytics.YOUR-SUBDOMAIN.workers.dev/tracker.js"></script>
 ```
 
+To instrument a site, get the exact tag with `snippet -s <site>`, then add it once to the
+global `<head>` (Astro base layout; Next.js App Router `app/layout.tsx` or Pages
+`pages/_document.tsx` `<Head>`; plain HTML the shared header). It must appear once per page,
+needs no cookie/consent banner (no cookies, no PII), and `data-site-id` must exactly match a
+site in `ALLOWED_SITES`. After it ships, confirm with `stats -s <site> -p today`.
+
 ## 4. Querying
 
 All query commands: `npx @jayfarei/lazyanalytics <command> -s example.com [options]`
@@ -67,9 +73,15 @@ All query commands: `npx @jayfarei/lazyanalytics <command> -s example.com [optio
 | Command | Returns | Extra options |
 |---|---|---|
 | `stats` | Pageviews, approx visitors, avg screen width | — |
+| `active` | Current active visitors | `--window 1..60` (default `5`) |
 | `pages` | Top pages by view count | — |
 | `referrers` | Top referrer domains | — |
 | `geo` | Breakdown by country | — |
+| `channels` | Pageview-scoped acquisition channels | — |
+| `crawlers` | JS-executing AI crawler/agent breakdown | `--type name\|operator\|class` |
+| `bounce` | Approximate bounce rate | Returns `null` when sampled |
+| `duration` | Average session duration, seconds | — |
+| `history` | Live + R2 archive history | `--dimension totals\|pages\|referrers\|geo\|browsers`, `--days`, or `--from`/`--to` |
 | `browsers` | Browser/OS/device breakdown | `--type browser\|os\|device` (default `browser`) |
 | `timeseries` | Pageviews over time | `--unit hour\|day` (default `day`) |
 | `usage` | Worker request usage, free-plan headroom, est. cost | `-p today\|7d\|30d` (default `today`), `-w/--worker <name>`; needs `CF_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN`, not the analytics token |
@@ -98,6 +110,8 @@ Exit codes:
 
 Sampling: Analytics Engine samples data under load. If `meta.sampled` is `true`,
 numbers are extrapolated estimates — say so when reporting them to the user.
+For bounce, sampled data returns `bounce_rate: null` because sampled row counts
+make single-page session detection unreliable.
 
 ## 6. Error handling
 

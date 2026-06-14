@@ -26,3 +26,8 @@ export async function hashVisitor(
 export function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+/** Return the fixed-width session slot for a timestamp. Defaults to 30 minutes. */
+export function sessionWindow(epochMs: number, slotMs = 30 * 60 * 1000): string {
+  return String(Math.floor(epochMs / slotMs));
+}

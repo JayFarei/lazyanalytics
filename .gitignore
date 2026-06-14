@@ -11,3 +11,5 @@ dist/
 .opentraces/
 .opentraces.json
 .tmux-session
+runs/
+.claude/

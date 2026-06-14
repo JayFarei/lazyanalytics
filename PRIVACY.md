@@ -15,6 +15,7 @@ When a page on a tracked site loads, the tracking script sends a beacon to your 
 | Browser, OS, device type | Coarse values derived from the User-Agent (e.g. `Chrome`, `macOS`, `desktop`). The UA string itself is not stored. |
 | Screen width | A single number (e.g. `1440`), used for responsive-design insight. |
 | UTM source / medium | Only `utm_source` and `utm_medium`, if present in the URL when the page loaded. |
+| Engagement duration | A best-effort millisecond count is sent when the page is hidden or unloaded. It is aggregated for session duration; no interaction timeline is stored. |
 
 ## What is NOT collected
 
@@ -23,11 +24,11 @@ When a page on a tracked site loads, the tracking script sends a beacon to your 
 - **No raw IP addresses** are ever stored.
 - **No full URLs.** Query strings (tokens, search terms, email addresses in params) never leave the visitor's browser.
 - **No fingerprinting**: no canvas, fonts, hardware enumeration, or behavioral signals.
-- Known bots and crawlers are filtered out and not recorded.
+- Known generic bots and crawlers are filtered out and not recorded. If the operator enables AI crawler tracking, JavaScript-executing AI agents are stored separately from human traffic with user-agent-derived name/operator/type labels; raw User-Agent strings are still not stored.
 
 ## Retention and deletion
 
-Data is stored in Cloudflare Analytics Engine, which retains data points for **90 days** and then deletes them automatically. There is no per-visitor deletion mechanism: stored visitor hashes are not linkable back to a person without the secret salt, so there is no way to find (and therefore selectively delete) one visitor's rows. Deleting the whole dataset is the only deletion granularity.
+Data points are stored in Cloudflare Analytics Engine, which retains them for **90 days** and then deletes them automatically. If archive mode is enabled, the worker also stores daily aggregate JSON rollups in R2; those rollups contain totals and top dimensions only, not raw events, raw IPs, User-Agent strings, or session hashes. There is no per-visitor deletion mechanism: stored visitor hashes are not linkable back to a person without the secret salt, so there is no way to find (and therefore selectively delete) one visitor's rows. Deleting the whole dataset and archive bucket is the available deletion granularity.
 
 ## Data processor
 

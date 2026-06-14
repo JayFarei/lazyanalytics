@@ -1,8 +1,9 @@
 import type { Context } from 'hono';
 import type { Env } from './index';
 import { parseUA } from './lib/parse-ua';
-import { hashVisitor, todayUTC } from './lib/visitor';
-import { isBot } from './lib/bot';
+import { hashVisitor, sessionWindow, todayUTC } from './lib/visitor';
+import { classifyCrawler } from './lib/crawlers';
+import { classifyChannel } from './lib/channels';
 
 interface BeaconPayload {
   sid: string;   // site_id
@@ -11,6 +12,8 @@ interface BeaconPayload {
   sw?: number;   // screen width
   us?: string;   // utm_source
   um?: string;   // utm_medium
+  t?: 'pv' | 'eng'; // event type
+  em?: number;   // engagement_ms
 }
 
 export async function collect(c: Context<{ Bindings: Env }>) {
@@ -21,8 +24,11 @@ export async function collect(c: Context<{ Bindings: Env }>) {
 
   const ua = c.req.header('User-Agent') || '';
 
-  // Bot filtering
-  if (isBot(ua)) {
+  const cls = classifyCrawler(ua);
+  if (cls.kind === 'bot') {
+    return c.newResponse(null, 204);
+  }
+  if (cls.kind === 'ai' && c.env.TRACK_AI_CRAWLERS !== 'true') {
     return c.newResponse(null, 204);
   }
 
@@ -89,27 +95,41 @@ export async function collect(c: Context<{ Bindings: Env }>) {
 
   // Parse user agent
   const parsed = parseUA(ua);
+  const channel = classifyChannel(referrerDomain, payload.us || '', payload.um || '');
 
   // Generate visitor hash (salted with the per-deployment HASH_SALT secret)
+  const now = Date.now();
   const visitorHash = await hashVisitor(payload.sid, ip, ua, todayUTC(), c.env.HASH_SALT);
+  const sessionHash = await hashVisitor(payload.sid, ip, ua, sessionWindow(now), c.env.HASH_SALT);
+  const eventType = payload.t === 'eng' ? 'eng' : 'pv';
+  const engagementMs = Math.max(0, Math.round(Number(payload.em) || 0));
 
   // Write to Analytics Engine (non-blocking)
   c.env.ANALYTICS.writeDataPoint({
     indexes: [visitorHash],
     blobs: [
-      payload.sid,       // blob1: site_id
-      pagePath,          // blob2: page path (no query string)
-      referrerDomain,    // blob3: referrer domain
-      country,           // blob4: country
-      parsed.browser,    // blob5: browser
-      parsed.os,         // blob6: OS
-      parsed.device,     // blob7: device type
-      payload.us || '',  // blob8: utm_source
-      payload.um || '',  // blob9: utm_medium
+      payload.sid,                         // blob1: site_id
+      pagePath,                            // blob2: page path (no query string)
+      referrerDomain,                      // blob3: referrer domain
+      country,                             // blob4: country
+      parsed.browser,                      // blob5: browser
+      parsed.os,                           // blob6: OS
+      parsed.device,                       // blob7: device type
+      payload.us || '',                    // blob8: utm_source
+      payload.um || '',                    // blob9: utm_medium
+      cls.kind === 'ai' ? 'ai' : '',       // blob10: traffic_class
+      channel,                             // blob11: channel
+      sessionHash,                         // blob12: session_id
+      cls.name || '',                      // blob13: crawler_name
+      cls.operator || '',                  // blob14: crawler_operator
+      cls.type || '',                      // blob15: crawler_type
+      eventType,                           // blob16: event_type
     ],
     doubles: [
       1,                        // double1: count
       payload.sw || 0,          // double2: screen width
+      0,                        // double3: reserved
+      engagementMs,             // double4: engagement_ms
     ],
   });
 

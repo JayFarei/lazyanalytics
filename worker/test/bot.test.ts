@@ -1,13 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { isBot } from '../src/lib/bot';
+import { classifyCrawler } from '../src/lib/crawlers';
 
 describe('isBot', () => {
   it('flags known crawlers and tools', () => {
     const bots = [
       'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
       'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
-      'Mozilla/5.0 AppleWebKit/537.36 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)',
-      'GPTBot/1.0 (+https://openai.com/gptbot)',
       'curl/8.4.0 (x86_64-apple-darwin)',
       'python-requests/2.31.0 something',
       'Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/120.0.0.0 Safari/537.36',
@@ -37,5 +36,23 @@ describe('isBot', () => {
   it('treats empty or suspiciously short UAs as bots', () => {
     expect(isBot('')).toBe(true);
     expect(isBot('Mozilla')).toBe(true);
+  });
+
+  it('classifies AI agents before broad bot/crawl matching', () => {
+    expect(classifyCrawler('Mozilla/5.0 ChatGPT-User/1.0')).toMatchObject({
+      kind: 'ai',
+      name: 'ChatGPT-User',
+      operator: 'OpenAI',
+      type: 'user',
+    });
+    expect(classifyCrawler('OAI-SearchBot/1.0 GPTBot/1.0')).toMatchObject({ name: 'OAI-SearchBot' });
+    expect(classifyCrawler('Claude-User/1.0 ClaudeBot/1.0')).toMatchObject({ name: 'Claude-User' });
+    expect(classifyCrawler('Perplexity-User/1.0 PerplexityBot/1.0')).toMatchObject({ name: 'Perplexity-User' });
+    expect(isBot('GPTBot/1.0 (+https://openai.com/gptbot)')).toBe(false);
+  });
+
+  it('defaults classifier errors to bot', () => {
+    const bad = { toString: () => { throw new Error('boom'); } } as unknown as string;
+    expect(classifyCrawler(bad).kind).toBe('bot');
   });
 });

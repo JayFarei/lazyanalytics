@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hashVisitor, todayUTC } from '../src/lib/visitor';
+import { hashVisitor, sessionWindow, todayUTC } from '../src/lib/visitor';
 
 const SITE = 'example.com';
 const IP = '203.0.113.7';
@@ -41,5 +41,13 @@ describe('hashVisitor', () => {
 describe('todayUTC', () => {
   it('returns YYYY-MM-DD', () => {
     expect(todayUTC()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('sessionWindow', () => {
+  it('keeps hits inside a 30-minute slot together and splits later hits', () => {
+    const base = Date.UTC(2026, 5, 13, 12, 0, 0);
+    expect(sessionWindow(base)).toBe(sessionWindow(base + 5 * 60 * 1000));
+    expect(sessionWindow(base)).not.toBe(sessionWindow(base + 31 * 60 * 1000));
   });
 });

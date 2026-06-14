@@ -11,6 +11,8 @@ import {
   formatTimestamp,
   extractSampled,
   extractParams,
+  parseLongPeriod,
+  dayKeys,
 } from '../src/lib/query';
 import type { Env } from '../src/index';
 
@@ -30,6 +32,21 @@ describe('buildWhereClause', () => {
     const where = buildWhereClause({ site: 'example.com', startAt, endAt });
     expect(where).toContain("timestamp >= toDateTime('2026-06-01 00:00:00')");
     expect(where).toContain("timestamp <= toDateTime('2026-06-08 12:30:45')");
+  });
+
+  it('defaults to human pageview rows', () => {
+    const where = buildWhereClause({ site: 'example.com', startAt, endAt });
+    expect(where).toContain("(blob10 = '' OR blob10 IS NULL)");
+    expect(where).toContain("(blob16 = 'pv' OR blob16 = '' OR blob16 IS NULL)");
+  });
+
+  it('can opt into AI traffic and all event rows', () => {
+    const where = buildWhereClause(
+      { site: 'example.com', startAt, endAt },
+      { trafficClass: 'ai', eventType: 'all' },
+    );
+    expect(where).toContain("blob10 = 'ai'");
+    expect(where).not.toContain("blob16 = 'pv'");
   });
 
   it('escapes single quotes in the site value', () => {
@@ -99,6 +116,21 @@ describe('extractParams', () => {
   it('requires a known site', () => {
     expect(() => extractParams(fakeCtx({}), env)).toThrow(/Missing required parameter: site/);
     expect(() => extractParams(fakeCtx({ site: 'other.com' }), env)).toThrow(/Unknown site/);
+  });
+});
+
+describe('parseLongPeriod / dayKeys', () => {
+  it('interprets days as exactly N UTC calendar days including today', () => {
+    const now = new Date('2026-06-13T12:00:00Z');
+    const { startAt, endAt, period } = parseLongPeriod({ days: '3' }, now);
+    expect(period).toBe('3d');
+    expect(dayKeys(startAt, endAt)).toEqual(['2026-06-11', '2026-06-12', '2026-06-13']);
+  });
+
+  it('accepts explicit YYYY-MM-DD history ranges', () => {
+    const { startAt, endAt, period } = parseLongPeriod({ from: '2026-06-01', to: '2026-06-03' });
+    expect(period).toBe('2026-06-01..2026-06-03');
+    expect(dayKeys(startAt, endAt)).toEqual(['2026-06-01', '2026-06-02', '2026-06-03']);
   });
 });
 
