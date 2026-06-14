@@ -13,3 +13,4 @@ dist/
 .tmux-session
 runs/
 .claude/
+kb/
