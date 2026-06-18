@@ -29,6 +29,9 @@ export interface Env {
   CF_ACCOUNT_ID?: string;
   CF_API_TOKEN?: string;
   ARCHIVE?: R2Bucket;
+  // Incoming-webhook URL for the daily Slack digest (set via `wrangler secret put
+  // SLACK_WEBHOOK_URL`). Unset = digest disabled; the cron still archives to R2.
+  SLACK_WEBHOOK_URL?: string;
 }
 
 export const app = new Hono<{ Bindings: Env }>();

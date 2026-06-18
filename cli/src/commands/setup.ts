@@ -108,7 +108,7 @@ export function setupCommand(): Command {
       if (!existsSync(templatePath)) fail(`wrangler.toml template not found at ${templatePath}`);
       const archiveConfig = opts.archive === false
         ? ''
-        : `[[r2_buckets]]\nbinding = "ARCHIVE"\nbucket_name = "${opts.archiveBucket}"\n\n[triggers]\ncrons = ["5 1 * * *"]\n`;
+        : `[[r2_buckets]]\nbinding = "ARCHIVE"\nbucket_name = "${opts.archiveBucket}"\n\n# 06:00 UTC = 07:00 London during BST (06:00 London in winter; CF crons are UTC-only)\n[triggers]\ncrons = ["0 6 * * *"]\n`;
       const toml = readFileSync(templatePath, 'utf-8')
         .replace(/__WORKER_NAME__/g, opts.name)
         .replace(/__ALLOWED_SITES__/g, sites.join(','))
