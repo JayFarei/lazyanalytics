@@ -136,40 +136,70 @@ export async function buildDailyRollup(env: Env, site: string, day: string): Pro
   return rollup;
 }
 
-// Each buildDailyRollup issues ~8 Analytics Engine subrequests (1 totals + 6
-// dimensions + 1 R2 put), and Workers cap subrequests per invocation (50 on the
-// free plan). So a single cron run rolls up at most MAX_BUILDS_PER_RUN missing
-// days, scanning a short recent window newest-first. Daily runs keep R2 current
-// going forward and self-heal short gaps; we intentionally do NOT backfill the
-// full 90-day window in one invocation (it blows the subrequest budget).
+// Subrequest budget: R2 binding calls (head/get/put) and AE REST fetches all
+// count toward the Workers per-invocation subrequest cap (50 on the free plan).
+// One fresh site/day build costs 9 subrequests (1 head + 7 AE queries + 1 put),
+// so a steady-state cron run with N sites costs ~9N for the rollup phase plus 1
+// webhook POST for the digest (which reuses this run's freshly built rollups
+// instead of re-reading R2): the free plan fits at most 5 sites. The effective
+// budget is max(MAX_BUILDS_PER_RUN, sites.length) so one run always covers
+// yesterday for every configured site (issue #2: a fixed cap of 4 with 5 sites
+// permanently starved the last site's archive). ATTEMPTS count toward the
+// budget, successful or not, so a systemic AE/R2 failure stays bounded. With
+// sites >= the fixed cap the whole budget goes to yesterday, so older gaps
+// (e.g. from a skipped cron) heal on the next same-day invocation, such as the
+// manual re-fire that is the documented recovery for a skipped cron (issue #1).
 const ROLLUP_BACKFILL_WINDOW_DAYS = 5;
 const MAX_BUILDS_PER_RUN = 4;
 
-export async function rollupYesterday(env: Env, now: Date = new Date()): Promise<void> {
-  if (!env.ARCHIVE || !env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) return;
+export interface RollupRunResult {
+  built: number;
+  failed: number;
+  /** Rollups built for yesterday this run, keyed by site (the digest reuses them to skip R2 reads). */
+  yesterdayRollups: Map<string, DailyRollup>;
+}
+
+export async function rollupYesterday(env: Env, now: Date = new Date()): Promise<RollupRunResult> {
+  const result: RollupRunResult = { built: 0, failed: 0, yesterdayRollups: new Map() };
+  if (!env.ARCHIVE || !env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
+    console.warn('rollup: ARCHIVE binding or CF credentials missing, skipping rollup');
+    return result;
+  }
 
   const sites = parseAllowedSites(env.ALLOWED_SITES);
   const yesterday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
   const oldest = new Date(yesterday.getTime() - (ROLLUP_BACKFILL_WINDOW_DAYS - 1) * 24 * 60 * 60 * 1000);
 
-  let builds = 0;
-  for (const site of sites) {
-    // Newest day first so the most-queried recent days are archived before older ones.
-    const days = dayKeys(oldest, yesterday).reverse();
-    for (const day of days) {
-      if (builds >= MAX_BUILDS_PER_RUN) return;
+  const maxBuilds = Math.max(MAX_BUILDS_PER_RUN, sites.length);
+  // Newest day first, every site within a day: yesterday is archived for ALL
+  // configured sites before any older backfill day, so the build budget can
+  // never starve a site's current-day rollup.
+  const days = dayKeys(oldest, yesterday).reverse();
+  const yesterdayKey = days[0];
+  let attempts = 0;
+  for (const day of days) {
+    for (const site of sites) {
+      // Bound on failures too: a throwing ARCHIVE.head never reaches the
+      // attempts increment below, and a systemic failure must not scan the
+      // whole window at subrequest cost.
+      if (attempts >= maxBuilds || result.failed >= maxBuilds) return result;
       const key = `rollups/${site}/${day}.json`;
       try {
         const existing = await env.ARCHIVE.head(key);
         if (existing) continue;
+        attempts += 1;
         const rollup = await buildDailyRollup(env, site, day);
         await env.ARCHIVE.put(key, JSON.stringify(rollup));
-        builds += 1;
-      } catch {
+        result.built += 1;
+        if (day === yesterdayKey) result.yesterdayRollups.set(site, rollup);
+      } catch (e) {
         // One site/day failure should not prevent later days or sites from rolling up.
+        result.failed += 1;
+        console.error(`rollup: build failed site=${site} day=${day}`, e);
       }
     }
   }
+  return result;
 }
 
 export function isLiveRetentionDay(day: string, now: Date = new Date()): boolean {

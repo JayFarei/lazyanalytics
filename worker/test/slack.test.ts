@@ -61,13 +61,18 @@ describe('formatDigest', () => {
 
 describe('sendSlackDigest', () => {
   it('does nothing when SLACK_WEBHOOK_URL is unset', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     await sendSlackDigest({ ALLOWED_SITES: 'a.com' } as unknown as Env, new Date('2026-06-17T06:00:00Z'));
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith('digest: SLACK_WEBHOOK_URL not set, skipping digest');
+    warnSpy.mockRestore();
   });
 
   it('reads yesterday from R2 and POSTs the digest to the webhook', async () => {
+    // b.com's live-fallback failure (no CF creds) is expected and logged; keep output clean.
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -95,9 +100,11 @@ describe('sendSlackDigest', () => {
     expect(init.method).toBe('POST');
     const body = JSON.parse(init.body);
     expect(body.text).toContain('a.com: 567 visitors');
+    errSpy.mockRestore();
   });
 
   it('skips the POST entirely when no site has data', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const env = {
@@ -108,5 +115,100 @@ describe('sendSlackDigest', () => {
     } as unknown as Env;
     await sendSlackDigest(env, new Date('2026-06-17T06:00:00Z'));
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(errSpy.mock.calls.some((c) => String(c[0]).includes('no rollups buildable for 2026-06-16'))).toBe(true);
+    errSpy.mockRestore();
+  });
+
+  it('throws when the Slack webhook responds non-2xx, without leaking the URL', async () => {
+    const fetchMock = vi.fn(async () => new Response('rate limited', { status: 429 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const env = {
+      ALLOWED_SITES: 'a.com',
+      SLACK_WEBHOOK_URL: 'https://hooks.slack.com/services/T/B/x',
+      ARCHIVE: {
+        get: async () => ({ text: async () => JSON.stringify(rollup('a.com')) }),
+      },
+    } as unknown as Env;
+
+    await expect(sendSlackDigest(env, new Date('2026-06-17T06:00:00Z'))).rejects.toThrow(
+      'slack webhook returned 429',
+    );
+    // No retry: exactly one POST per cron firing.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(sendSlackDigest(env, new Date('2026-06-17T06:00:00Z'))).rejects.not.toThrow(
+      /hooks\.slack\.com/,
+    );
+  });
+
+  it('replaces a throwing webhook fetch with a constant-message error (no URL leak)', async () => {
+    // fetch TypeErrors embed the target URL, e.g. workerd's "Invalid URL: <url>".
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('Invalid URL: https://hooks.slack.com/services/SENTINEL_HOOK');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const env = {
+      ALLOWED_SITES: 'a.com',
+      SLACK_WEBHOOK_URL: 'https://hooks.slack.com/services/SENTINEL_HOOK',
+      ARCHIVE: {
+        get: async () => ({ text: async () => JSON.stringify(rollup('a.com')) }),
+      },
+    } as unknown as Env;
+
+    const rejection = await sendSlackDigest(env, new Date('2026-06-17T06:00:00Z')).then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(rejection).toBeInstanceOf(Error);
+    expect(rejection!.message).toBe('slack webhook fetch failed');
+    expect(String(rejection)).not.toContain('SENTINEL_HOOK');
+    expect((rejection as Error & { cause?: unknown }).cause).toBeUndefined();
+  });
+
+  it('uses prebuilt rollups from the rollup phase without touching R2', async () => {
+    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const gets: string[] = [];
+    const env = {
+      ALLOWED_SITES: 'a.com',
+      SLACK_WEBHOOK_URL: 'https://hooks.slack.com/services/T/B/x',
+      ARCHIVE: { get: async (key: string) => { gets.push(key); return null; } },
+    } as unknown as Env;
+    const prebuilt = new Map([['a.com', rollup('a.com')]]);
+
+    const status = await sendSlackDigest(env, new Date('2026-06-17T06:00:00Z'), prebuilt);
+
+    expect(status).toBe('posted');
+    // The prebuilt rollup short-circuits the archive read entirely.
+    expect(gets).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.text).toContain('a.com: 567 visitors');
+  });
+
+  it('degrades one site to the live fallback when its ARCHIVE read throws', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const env = {
+      ALLOWED_SITES: 'a.com,b.com',
+      SLACK_WEBHOOK_URL: 'https://hooks.slack.com/services/T/B/x',
+      ARCHIVE: {
+        get: async (key: string) => {
+          if (key === 'rollups/a.com/2026-06-16.json') throw new Error('r2 transient');
+          return { text: async () => JSON.stringify(rollup('b.com')) };
+        },
+      },
+      // No CF creds, so a.com's live-build fallback returns null.
+    } as unknown as Env;
+
+    await sendSlackDigest(env, new Date('2026-06-17T06:00:00Z'));
+
+    // The digest still posts, carrying the healthy site only.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.text).toContain('b.com: 567 visitors');
+    expect(body.text).not.toContain('a.com:');
+    expect(errSpy.mock.calls.some((c) => String(c[0]).includes('site=a.com'))).toBe(true);
+    errSpy.mockRestore();
   });
 });

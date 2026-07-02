@@ -14,4 +14,9 @@ TRACK_AI_CRAWLERS = "__TRACK_AI_CRAWLERS__"
 binding = "ANALYTICS"
 dataset = "agent_analytics"
 
+# Workers Logs: retain console.* output per invocation (incl. cron runs).
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 __ARCHIVE_CONFIG__
