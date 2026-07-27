@@ -80,7 +80,7 @@ describe('sendSlackDigest', () => {
   it('reads yesterday from R2 and POSTs the digest to the webhook', async () => {
     // b.com's live-fallback failure (no CF creds) is expected and logged; keep output clean.
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const gets: string[] = [];
@@ -102,10 +102,10 @@ describe('sendSlackDigest', () => {
 
     expect(gets).toContain('rollups/a.com/2026-06-16.json');
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://hooks.slack.com/services/T/B/x');
-    expect(init.method).toBe('POST');
-    const body = JSON.parse(init.body);
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body));
     expect(body.text).toContain('a.com: 567 visitors');
     errSpy.mockRestore();
   });
@@ -127,7 +127,7 @@ describe('sendSlackDigest', () => {
   });
 
   it('throws when the Slack webhook responds non-2xx, without leaking the URL', async () => {
-    const fetchMock = vi.fn(async () => new Response('rate limited', { status: 429 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('rate limited', { status: 429 }));
     vi.stubGlobal('fetch', fetchMock);
     const env = {
       ALLOWED_SITES: 'a.com',
@@ -149,7 +149,7 @@ describe('sendSlackDigest', () => {
 
   it('replaces a throwing webhook fetch with a constant-message error (no URL leak)', async () => {
     // fetch TypeErrors embed the target URL, e.g. workerd's "Invalid URL: <url>".
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
       throw new TypeError('Invalid URL: https://hooks.slack.com/services/SENTINEL_HOOK');
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -172,7 +172,7 @@ describe('sendSlackDigest', () => {
   });
 
   it('uses prebuilt rollups from the rollup phase without touching R2', async () => {
-    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const gets: string[] = [];
     const env = {
@@ -188,13 +188,13 @@ describe('sendSlackDigest', () => {
     // The prebuilt rollup short-circuits the archive read entirely.
     expect(gets).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
     expect(body.text).toContain('a.com: 567 visitors');
   });
 
   it('degrades one site to the live fallback when its ARCHIVE read throws', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const env = {
       ALLOWED_SITES: 'a.com,b.com',
@@ -212,7 +212,7 @@ describe('sendSlackDigest', () => {
 
     // The digest still posts, carrying the healthy site only.
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
     expect(body.text).toContain('b.com: 567 visitors');
     expect(body.text).not.toContain('a.com:');
     expect(errSpy.mock.calls.some((c) => String(c[0]).includes('site=a.com'))).toBe(true);
