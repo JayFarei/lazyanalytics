@@ -16,6 +16,12 @@ export interface RollupRow {
   name: string;
   views: number;
   approx_visitors: number;
+  /**
+   * Mean engagement in ms for this row, over the beacons that carried one.
+   * Optional: rollups archived before this field existed simply omit it, and
+   * every consumer must treat `undefined` as "not measured", not as zero.
+   */
+  avg_engagement_ms?: number;
 }
 
 export interface DailyRollup {
@@ -52,10 +58,18 @@ function capRows(rows: RollupRow[], cap = 100): RollupRow[] {
   if (rows.length <= cap) return rows;
   const head = rows.slice(0, cap);
   const tail = rows.slice(cap);
+  // Views-weighted mean, so folding the tail does not let a single rarely-seen
+  // page dominate the bucket's average.
+  const tailViews = tail.reduce((sum, row) => sum + row.views, 0);
+  const tailEngaged = tail.reduce(
+    (sum, row) => sum + (row.avg_engagement_ms ?? 0) * row.views,
+    0,
+  );
   head.push({
     name: 'other',
-    views: tail.reduce((sum, row) => sum + row.views, 0),
+    views: tailViews,
     approx_visitors: tail.reduce((sum, row) => sum + row.approx_visitors, 0),
+    ...(tailEngaged > 0 ? { avg_engagement_ms: tailEngaged / (tailViews || 1) } : {}),
   });
   return head;
 }
@@ -69,6 +83,8 @@ async function rollupDimension(env: Env, site: string, day: string, dimension: R
       ${column} as name,
       SUM(_sample_interval) as views,
       COUNT(DISTINCT index1) as approx_visitors,
+      SUM(IF(blob16 = 'eng', double4 * _sample_interval, 0)) as engagement_ms_total,
+      SUM(IF(blob16 = 'eng', _sample_interval, 0)) as engagement_events,
       MAX(_sample_interval) as max_interval
     FROM ${DATASET}
     ${where}
@@ -81,11 +97,19 @@ async function rollupDimension(env: Env, site: string, day: string, dimension: R
   const result = await queryAE(env, sql);
   const { rows, sampled } = extractSampled(result.data);
   return {
-    rows: capRows(rows.map((row) => ({
-      name: String(row.name || ''),
-      views: asNumber(row.views),
-      approx_visitors: asNumber(row.approx_visitors),
-    }))),
+    rows: capRows(rows.map((row) => {
+      const engagedEvents = asNumber(row.engagement_events);
+      return {
+        name: String(row.name || ''),
+        views: asNumber(row.views),
+        approx_visitors: asNumber(row.approx_visitors),
+        // Omitted rather than zeroed when nothing reported engagement: zero
+        // would read as "they left instantly", which is a different claim.
+        ...(engagedEvents > 0
+          ? { avg_engagement_ms: asNumber(row.engagement_ms_total) / engagedEvents }
+          : {}),
+      };
+    })),
     sampled,
   };
 }

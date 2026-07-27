@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { digestDay, formatDigest, sendSlackDigest } from '../src/lib/slack';
+import {
+  digestDay,
+  formatDigest,
+  humanMs,
+  journeyLines,
+  parseJourneyPrefixes,
+  sendSlackDigest,
+} from '../src/lib/slack';
 import type { DailyRollup } from '../src/lib/rollup';
 import type { Env } from '../src/index';
 
@@ -73,7 +80,7 @@ describe('sendSlackDigest', () => {
   it('reads yesterday from R2 and POSTs the digest to the webhook', async () => {
     // b.com's live-fallback failure (no CF creds) is expected and logged; keep output clean.
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const gets: string[] = [];
@@ -95,10 +102,10 @@ describe('sendSlackDigest', () => {
 
     expect(gets).toContain('rollups/a.com/2026-06-16.json');
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('https://hooks.slack.com/services/T/B/x');
-    expect(init.method).toBe('POST');
-    const body = JSON.parse(init.body);
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body));
     expect(body.text).toContain('a.com: 567 visitors');
     errSpy.mockRestore();
   });
@@ -120,7 +127,7 @@ describe('sendSlackDigest', () => {
   });
 
   it('throws when the Slack webhook responds non-2xx, without leaking the URL', async () => {
-    const fetchMock = vi.fn(async () => new Response('rate limited', { status: 429 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('rate limited', { status: 429 }));
     vi.stubGlobal('fetch', fetchMock);
     const env = {
       ALLOWED_SITES: 'a.com',
@@ -142,7 +149,7 @@ describe('sendSlackDigest', () => {
 
   it('replaces a throwing webhook fetch with a constant-message error (no URL leak)', async () => {
     // fetch TypeErrors embed the target URL, e.g. workerd's "Invalid URL: <url>".
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
       throw new TypeError('Invalid URL: https://hooks.slack.com/services/SENTINEL_HOOK');
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -165,7 +172,7 @@ describe('sendSlackDigest', () => {
   });
 
   it('uses prebuilt rollups from the rollup phase without touching R2', async () => {
-    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const gets: string[] = [];
     const env = {
@@ -181,13 +188,13 @@ describe('sendSlackDigest', () => {
     // The prebuilt rollup short-circuits the archive read entirely.
     expect(gets).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
     expect(body.text).toContain('a.com: 567 visitors');
   });
 
   it('degrades one site to the live fallback when its ARCHIVE read throws', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const fetchMock = vi.fn(async () => new Response('ok', { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const env = {
       ALLOWED_SITES: 'a.com,b.com',
@@ -205,10 +212,90 @@ describe('sendSlackDigest', () => {
 
     // The digest still posts, carrying the healthy site only.
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1]?.body));
     expect(body.text).toContain('b.com: 567 visitors');
     expect(body.text).not.toContain('a.com:');
     expect(errSpy.mock.calls.some((c) => String(c[0]).includes('site=a.com'))).toBe(true);
     errSpy.mockRestore();
+  });
+});
+
+describe('humanMs', () => {
+  it('reads as seconds under a minute and minutes above', () => {
+    expect(humanMs(4_200)).toBe('4s');
+    expect(humanMs(59_400)).toBe('59s');
+    expect(humanMs(134_000)).toBe('2m 14s');
+    // A whole number of minutes drops the redundant "0s".
+    expect(humanMs(120_000)).toBe('2m');
+  });
+});
+
+describe('parseJourneyPrefixes', () => {
+  it('splits, trims and drops blanks', () => {
+    expect(parseJourneyPrefixes('/pitch/, /onboarding/')).toEqual(['/pitch/', '/onboarding/']);
+    expect(parseJourneyPrefixes('')).toEqual([]);
+    expect(parseJourneyPrefixes(undefined)).toEqual([]);
+    expect(parseJourneyPrefixes(' , ,')).toEqual([]);
+  });
+});
+
+describe('journeyLines', () => {
+  const pages = [
+    { name: '/pitch/03-the-pieces', views: 8, approx_visitors: 5, avg_engagement_ms: 41_000 },
+    { name: '/pitch/01-title', views: 12, approx_visitors: 9, avg_engagement_ms: 9_000 },
+    { name: '/pitch/02-opening', views: 10, approx_visitors: 7 },
+    { name: '/', views: 900, approx_visitors: 500 },
+  ];
+
+  it('orders by path, not by views, so the sequence is readable', () => {
+    const lines = journeyLines(pages, '/pitch/');
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('01-title');
+    expect(lines[1]).toContain('02-opening');
+    expect(lines[2]).toContain('03-the-pieces');
+  });
+
+  it('strips the prefix and appends average time when it was measured', () => {
+    const lines = journeyLines(pages, '/pitch/');
+    expect(lines[0]).toContain('9s avg');
+    expect(lines[2]).toContain('41s avg');
+    // No engagement recorded: say nothing rather than claim 0s.
+    expect(lines[1]).not.toContain('avg');
+  });
+
+  it('excludes paths outside the prefix and the capped "other" bucket', () => {
+    expect(journeyLines(pages, '/pitch/').join('\n')).not.toContain('/');
+    const withOther = [...pages, { name: 'other', views: 3, approx_visitors: 2 }];
+    expect(journeyLines(withOther, '/pitch/')).toHaveLength(3);
+  });
+
+  it('returns nothing when no page matches', () => {
+    expect(journeyLines(pages, '/nope/')).toEqual([]);
+  });
+});
+
+describe('formatDigest journey section', () => {
+  it('adds an ordered section per configured prefix', () => {
+    const r = rollup('openmake.ai', {
+      pages: [
+        { name: '/pitch/02-opening', views: 4, approx_visitors: 3, avg_engagement_ms: 30_000 },
+        { name: '/pitch/01-title', views: 5, approx_visitors: 4, avg_engagement_ms: 12_000 },
+      ],
+    });
+    const msg = formatDigest('2026-06-16', [r], ['/pitch/']);
+    // Scope to the journey block: the "Top pages" summary above it is ordered
+    // by views, so whole-message index comparisons would test the wrong thing.
+    const journey = msg.blocks
+      .map((b) => String((b as { text?: { text?: string } }).text?.text || ''))
+      .find((t) => t.startsWith('*/pitch/*'));
+    expect(journey).toBeDefined();
+    expect(journey!.indexOf('01-title')).toBeLessThan(journey!.indexOf('02-opening'));
+    expect(journey).toContain('12s avg');
+  });
+
+  it('omits the section entirely when nothing matches', () => {
+    const before = JSON.stringify(formatDigest('2026-06-16', [rollup('farei.me')]));
+    const after = JSON.stringify(formatDigest('2026-06-16', [rollup('farei.me')], ['/pitch/']));
+    expect(after).toBe(before);
   });
 });

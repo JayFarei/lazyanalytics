@@ -32,6 +32,11 @@ export interface Env {
   // Incoming-webhook URL for the daily Slack digest (set via `wrangler secret put
   // SLACK_WEBHOOK_URL`). Unset = digest disabled; the cron still archives to R2.
   SLACK_WEBHOOK_URL?: string;
+  // Optional path prefix (e.g. `/pitch/`) whose pages get an ordered, per-page
+  // "journey" section in the daily digest, with time on page. Use it for a
+  // funnel or a deck where the sequence matters and a top-3 list hides it.
+  // Unset = no journey section. Multiple prefixes: comma-separated.
+  DIGEST_JOURNEY_PREFIX?: string;
 }
 
 export const app = new Hono<{ Bindings: Env }>();

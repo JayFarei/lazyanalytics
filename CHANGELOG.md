@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Optional `DIGEST_JOURNEY_PREFIX` worker variable: paths under the configured prefix (comma-separated for several) get their own ordered section in the daily Slack digest, listed by path rather than by views so a funnel or a deck reads in sequence, with average time on page.
+- Per-page average engagement in daily rollups (`RollupRow.avg_engagement_ms`). Omitted when nothing reported engagement, so "not measured" stays distinct from "left instantly". Rollups archived before this change simply lack the field.
+
 ## [0.3.0] - 2026-06-13
 
 ### Added

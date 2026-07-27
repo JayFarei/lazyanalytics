@@ -29,13 +29,52 @@ function topList(rows: RollupRow[], limit = 3): string {
     .join(', ');
 }
 
+/** "2m 14s" / "48s" — a digest is read at a glance, not parsed. */
+export function humanMs(ms: number): string {
+  const total = Math.round(ms / 1000);
+  if (total < 60) return total + 's';
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return s ? `${m}m ${s}s` : `${m}m`;
+}
+
+/** Comma-separated prefixes, trimmed and de-blanked. */
+export function parseJourneyPrefixes(raw: string | undefined): string[] {
+  return (raw || '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Ordered per-page lines for the pages under `prefix`.
+ *
+ * Sorted by path, not by views: for a funnel or a deck the sequence is the
+ * point, and a views-ordered list hides exactly the drop-off you are looking
+ * for. Returns [] when nothing matched, so the caller can omit the section.
+ */
+export function journeyLines(pages: RollupRow[], prefix: string): string[] {
+  return pages
+    .filter((r) => r.name.startsWith(prefix) && r.name !== 'other')
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((r) => {
+      const label = r.name.slice(prefix.length) || r.name;
+      const time = r.avg_engagement_ms ? ` · ${humanMs(r.avg_engagement_ms)} avg` : '';
+      return `\`${String(r.views).padStart(4)}\`  ${label}${time}`;
+    });
+}
+
 /** The UTC day key for "yesterday" relative to `now` (the digest covers this day). */
 export function digestDay(now: Date): string {
   return utcDayKey(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)));
 }
 
 /** Build the Slack message from per-site rollups. Pure: no IO, fully testable. */
-export function formatDigest(day: string, rollups: DailyRollup[]): SlackMessage {
+export function formatDigest(
+  day: string,
+  rollups: DailyRollup[],
+  journeyPrefixes: string[] = [],
+): SlackMessage {
   const blocks: Array<Record<string, unknown>> = [
     {
       type: 'header',
@@ -58,6 +97,15 @@ export function formatDigest(day: string, rollups: DailyRollup[]): SlackMessage 
 
     blocks.push({ type: 'divider' });
     blocks.push({ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } });
+
+    for (const prefix of journeyPrefixes) {
+      const journey = journeyLines(r.pages, prefix);
+      if (!journey.length) continue;
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: `*${prefix}*\n${journey.join('\n')}` },
+      });
+    }
   }
 
   return {
@@ -131,7 +179,7 @@ export async function sendSlackDigest(
     res = await fetch(webhook, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formatDigest(day, rollups)),
+      body: JSON.stringify(formatDigest(day, rollups, parseJourneyPrefixes(env.DIGEST_JOURNEY_PREFIX))),
     });
   } catch {
     throw new Error('slack webhook fetch failed');
